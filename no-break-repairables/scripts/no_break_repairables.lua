@@ -1,4 +1,5 @@
 local FUELTYPE = GLOBAL.FUELTYPE
+local REPAIR_THRESHOLD = 0.01
 
 local BROKEN_ITEM_TAG = "no_break_repairables_broken"
 local BROKEN_EQUIP_RESTRICTION = "no_break_repairables_can_equip_broken"
@@ -215,11 +216,16 @@ local function SyncBrokenState(inst)
     end
 
     local percent = GetDurabilityPercent(inst, state.kind)
-    if percent ~= nil and percent <= 0 then
+    if percent == nil then
+        return
+    end
+
+    if percent <= 0 or (state.was_broken_on_load and percent <= REPAIR_THRESHOLD) then
         SetBroken(inst)
-    elseif percent ~= nil then
+    elseif percent > REPAIR_THRESHOLD then
         SetRepaired(inst)
     end
+    state.was_broken_on_load = nil
 end
 
 local function OnPercentUsedChange(inst)
@@ -234,6 +240,23 @@ local function InstallState(inst, kind, repair_mode)
         broken = false,
     }
     inst._no_break_repairables_state = state
+
+    -- Repairs at or below the recovery threshold must stay broken after loading.
+    local on_save = inst.OnSave
+    inst.OnSave = function(inst, data, ...)
+        data.no_break_repairables_broken = state.broken or state.was_broken_on_load or nil
+        if on_save ~= nil then
+            return on_save(inst, data, ...)
+        end
+    end
+
+    local on_load = inst.OnLoad
+    inst.OnLoad = function(inst, data, ...)
+        if on_load ~= nil then
+            on_load(inst, data, ...)
+        end
+        state.was_broken_on_load = data ~= nil and data.no_break_repairables_broken == true
+    end
 
     inst:ListenForEvent("percentusedchange", OnPercentUsedChange)
 

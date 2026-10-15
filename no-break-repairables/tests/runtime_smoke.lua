@@ -200,45 +200,142 @@ local function TestHealthySpareFallback()
     Cleanup(umbrella_owner)
 end
 
-local function TestDreadstone(done)
-    local owner = GLOBAL.SpawnPrefab("wilson")
-    local item = GLOBAL.SpawnPrefab("dreadstonehat")
-    local body = GLOBAL.SpawnPrefab("armordreadstone")
-    local original_absorption = item.components.armor.absorb_percent
-    local original_body_absorption = body.components.armor.absorb_percent
-    owner.components.sanity:SetPercent(0)
-    owner.components.inventory:Equip(item)
-    item.components.armor:SetCondition(0)
-    Check(item:IsValid() and IsBroken(item), "dreadstonehat survives zero armor")
-    Check(item.components.armor.absorb_percent == 0, "dreadstonehat has no absorption at zero")
-    Check(not item.components.equippable:IsEquipped(), "dreadstonehat is force-unequipped at zero")
-    Check(item.components.equippable.restrictedtag == API.broken_equip_restriction,
-        "dreadstonehat cannot retain secondary equipped effects at zero")
+local function TestRepairThreshold()
+    for _, prefab in ipairs({ "eyemaskhat", "orangeamulet", "yellowamulet" }) do
+        local owner = GLOBAL.SpawnPrefab("wilson")
+        local item = GLOBAL.SpawnPrefab(prefab)
+        local durability = item.components[API.get_state(item).kind]
+        durability:SetPercent(0.005)
+        owner.components.inventory:Equip(item)
+        Check(not IsBroken(item) and item.components.equippable:IsEquipped(),
+            prefab .. " remains usable below 1% until depleted")
 
-    owner.components.inventory:Equip(body)
-    body.components.armor:SetCondition(0)
-    Check(body:IsValid() and IsBroken(body), "armordreadstone survives zero armor")
-    Check(body.components.armor.absorb_percent == 0, "armordreadstone has no absorption at zero")
-    Check(not body.components.equippable:IsEquipped(), "armordreadstone is force-unequipped at zero")
-    Check(body.components.equippable.restrictedtag == API.broken_equip_restriction,
-        "armordreadstone cannot retain secondary equipped effects at zero")
+        durability:SetPercent(0)
+        for _, percent in ipairs({ 0.005, 0.01 }) do
+            durability:SetPercent(percent)
+            Check(IsBroken(item), prefab .. " stays broken after repair to " .. percent)
+            owner.components.inventory:Equip(item)
+            Check(not item.components.equippable:IsEquipped(),
+                prefab .. " rejects equip at repair percent " .. percent)
+        end
 
-    GLOBAL.TheWorld:DoTaskInTime(GLOBAL.TUNING.ARMOR_DREADSTONE_REGEN_PERIOD + 0.2, function()
-        Check(item.components.armor:GetPercent() > 0,
-            "dreadstonehat broken-state bridge starts insanity self-repair")
-        Check(not IsBroken(item) and item.components.armor.absorb_percent == original_absorption,
-            "dreadstonehat restores equip permission and absorption after self-repair")
-        Check(API.get_state(item).self_repair_task == nil,
-            "dreadstonehat stops its broken-state repair task after recovery")
-        Check(body.components.armor:GetPercent() > 0,
-            "armordreadstone broken-state bridge starts insanity self-repair")
-        Check(not IsBroken(body) and body.components.armor.absorb_percent == original_body_absorption,
-            "armordreadstone restores equip permission and absorption after self-repair")
-        Check(API.get_state(body).self_repair_task == nil,
-            "armordreadstone stops its broken-state repair task after recovery")
+        durability:SetPercent(0.0101)
+        Check(not IsBroken(item), prefab .. " recovers only above 1%")
+        owner.components.inventory:Equip(item)
+        Check(item.components.equippable:IsEquipped(), prefab .. " equips after recovery above 1%")
         Cleanup(item)
-        Cleanup(body)
         Cleanup(owner)
+    end
+end
+
+local function TestPartialRepairReload(done)
+    local records = {}
+    for _, prefab in ipairs({ "eyemaskhat", "orangeamulet", "yellowamulet" }) do
+        for _, broken in ipairs({ false, true }) do
+            local item = GLOBAL.SpawnPrefab(prefab)
+            local durability = item.components[API.get_state(item).kind]
+            if broken then
+                durability:SetPercent(0)
+            end
+            durability:SetPercent(0.005)
+            local record = item:GetSaveRecord()
+            Check((record.data ~= nil and record.data.no_break_repairables_broken == true) == broken,
+                prefab .. " saves broken=" .. tostring(broken) .. " after a partial repair")
+            local restored = GLOBAL.SpawnSaveRecord(record)
+            records[#records + 1] = { item = restored, broken = broken, prefab = prefab }
+            Cleanup(item)
+        end
+    end
+
+    -- Zero-delay entity load tasks are unordered within a scheduler tick.
+    GLOBAL.TheWorld:DoTaskInTime(2 * GLOBAL.FRAMES, function()
+        for _, record in ipairs(records) do
+            local item = record.item
+            local owner = GLOBAL.SpawnPrefab("wilson")
+            local durability = item.components[API.get_state(item).kind]
+            Check(math.abs(durability:GetPercent() - 0.005) < 0.000001,
+                record.prefab .. " preserves partial durability across save/load")
+            Check(IsBroken(item) == record.broken,
+                record.prefab .. " restores broken=" .. tostring(record.broken) .. " across save/load")
+            owner.components.inventory:Equip(item)
+            Check(item.components.equippable:IsEquipped() == not record.broken,
+                record.prefab .. " preserves equip permission across save/load")
+            durability:SetPercent(0.02)
+            Check(not IsBroken(item), record.prefab .. " can recover after save/load")
+            local saved = item:GetSaveRecord()
+            Check(saved.data == nil or saved.data.no_break_repairables_broken ~= true,
+                record.prefab .. " clears saved broken state after recovery")
+            Cleanup(item)
+            Cleanup(owner)
+        end
+        done()
+    end)
+end
+
+local function TestDreadstone(done)
+    local low_sanity_owner = GLOBAL.SpawnPrefab("wilson")
+    local full_sanity_owner = GLOBAL.SpawnPrefab("wilson")
+    low_sanity_owner.components.sanity:SetPercent(0)
+    full_sanity_owner.components.sanity:SetPercent(1)
+    local spare = GLOBAL.SpawnPrefab("dreadstonehat")
+    low_sanity_owner.components.inventory:GiveItem(spare)
+
+    local records =
+    {
+        { prefab = "dreadstonehat", owner = low_sanity_owner },
+        { prefab = "armordreadstone", owner = low_sanity_owner },
+        { prefab = "dreadstonehat", owner = full_sanity_owner },
+    }
+    for _, record in ipairs(records) do
+        local item = GLOBAL.SpawnPrefab(record.prefab)
+        record.item = item
+        record.absorption = item.components.armor.absorb_percent
+        record.owner.components.inventory:Equip(item)
+        item.components.armor:SetCondition(0)
+        Check(item:IsValid() and IsBroken(item), record.prefab .. " survives zero armor")
+        Check(item.components.armor.absorb_percent == 0, record.prefab .. " has no absorption at zero")
+        Check(not item.components.equippable:IsEquipped(), record.prefab .. " is force-unequipped")
+    end
+    Check(low_sanity_owner.components.inventory:GetEquippedItem(GLOBAL.EQUIPSLOTS.HEAD) == spare,
+        "depleted dreadstonehat automatically equips a healthy spare")
+
+    local period = GLOBAL.TUNING.ARMOR_DREADSTONE_REGEN_PERIOD
+    GLOBAL.TheWorld:DoTaskInTime(period + 0.2, function()
+        for _, record in ipairs(records) do
+            local item = record.item
+            local percent = item.components.armor:GetPercent()
+            Check(percent > 0 and percent <= 0.01 and IsBroken(item),
+                record.prefab .. " remains broken after its first repair tick")
+            Check(item.components.armor.absorb_percent == 0,
+                record.prefab .. " has no absorption during partial repair")
+            Check(API.get_state(item).self_repair_task ~= nil,
+                record.prefab .. " keeps repairing until above 1%")
+            record.owner.components.inventory:Equip(item)
+            Check(not item.components.equippable:IsEquipped(),
+                record.prefab .. " rejects equip after its first repair tick")
+        end
+    end)
+
+    local ticks = math.floor(0.01 / GLOBAL.TUNING.ARMOR_DREADSTONE_REGEN_MINRATE) + 2
+    GLOBAL.TheWorld:DoTaskInTime(period * ticks + 0.2, function()
+        Check(low_sanity_owner.components.inventory:GetEquippedItem(GLOBAL.EQUIPSLOTS.HEAD) == spare,
+            "repaired dreadstonehat does not replace the equipped spare automatically")
+        for _, record in ipairs(records) do
+            local item = record.item
+            Check(item.components.armor:GetPercent() > 0.01 and not IsBroken(item),
+                record.prefab .. " self-repairs past 1% in normal sanity mode")
+            Check(item.components.armor.absorb_percent == record.absorption,
+                record.prefab .. " restores absorption after recovery")
+            Check(API.get_state(item).self_repair_task == nil,
+                record.prefab .. " stops broken-state repair after recovery")
+            record.owner.components.inventory:Equip(item)
+            Check(item.components.equippable:IsEquipped(),
+                record.prefab .. " can be equipped again above 1%")
+            Cleanup(item)
+        end
+        Cleanup(spare)
+        Cleanup(low_sanity_owner)
+        Cleanup(full_sanity_owner)
 
         local control = GLOBAL.SpawnPrefab("footballhat")
         Check(API.get_state(control) == nil, "non-repairable armor is not intercepted")
@@ -257,11 +354,14 @@ local function Run()
     TestFiniteUses()
     TestFueled()
     TestHealthySpareFallback()
-    TestDreadstone(function()
-        print(string.format("[NBR TEST] RESULT: passed=%d failed=%d", passed, failed))
-        if failed > 0 then
-            error(string.format("NBR runtime tests failed: %d", failed))
-        end
+    TestRepairThreshold()
+    TestPartialRepairReload(function()
+        TestDreadstone(function()
+            print(string.format("[NBR TEST] RESULT: passed=%d failed=%d", passed, failed))
+            if failed > 0 then
+                error(string.format("NBR runtime tests failed: %d", failed))
+            end
+        end)
     end)
 end
 

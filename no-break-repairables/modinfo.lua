@@ -1,13 +1,13 @@
-name = "Repairable Gear Stays"
+name = "坏而不毁 | No Break Repairables"
 description = [[
 可修复的耐久物品归零后不再消失。
 
 - 魔光护符、恐怖盾牌、眼面具归零后保留
 - 可修复 finiteuses 物品与可缝补装备归零后保留
-- 破损装备会失效，修复后自动恢复
+- 归零时自动卸下，修复到超过 1% 耐久后可重新装备
 ]]
 author = "yangfan.jimu"
-version = "1.0.0"
+version = "1.1.0"
 
 api_version = 10
 dst_compatible = true
