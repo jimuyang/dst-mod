@@ -51,7 +51,7 @@ Mod 明确支持：
 开发时可执行：
 
 ```bash
-ln -s /absolute/path/to/dst-mod/dst-no-break-repairables \
+ln -s /absolute/path/to/dst-mod/no-break-repairables \
   "$HOME/Library/Application Support/Steam/steamapps/common/Don't Starve Together/dontstarve_steam.app/Contents/mods/dst-no-break-repairables"
 ```
 
