@@ -55,7 +55,7 @@ flowchart TD
 
 “恐怖头盔”不是当前官中物品名。它与恐怖盾牌并列出现时最可能指 Terraria 联动的眼面具，因此 Mod 明确覆盖 `eyemaskhat`。同时也覆盖可能被混称的 `dreadstonehat`（官中“绝望石头盔”）。
 
-绝望石头盔和盔甲是特殊情况：原版只在装备且角色处于疯狂状态时自修复。若归零时强制卸下并禁装，自修复永远不会启动；若只把 armor absorption 设为 0，planar defense、shadow damage resist、头盔防水和 set bonus 等装备效果仍可能生效。最终适配为归零时完整卸下并禁装，由 Mod 在物品持有者处于疯狂状态时按原版速率桥接第一段修复；耐久恢复为正数后取消桥接并恢复装备权限。
+绝望石头盔和盔甲是特殊情况：原版在装备且角色处于普通理智模式（非启蒙模式）时自修复，并不要求进入低理智的疯狂状态。若归零时强制卸下并禁装，自修复永远不会启动；若只把 armor absorption 设为 0，planar defense、shadow damage resist、头盔防水和 set bonus 等装备效果仍可能生效。最终适配为归零时完整卸下并禁装，由 Mod 在物品持有者处于普通理智模式时按原版基础速率桥接第一次修复；耐久恢复为正数后取消桥接并恢复装备权限。
 
 ## 实现方案
 
@@ -67,7 +67,7 @@ flowchart TD
 4. 普通装备用 `Inventory:Unequip(..., force=true)` 触发原 `onunequip` 清理效果，再放回背包；背包无空间时沿用原版 `GiveItem` 的掉落行为。雨伞类在放回破损物品前保留原版 `umbrellaranout` 事件，并在旧 broken 同类物品截断原版单次查找时显式选择健康备用品。
 5. 设置 Mod 专属 equip restriction，并将 armor absorption 设为 0。
 6. 监听 `percentusedchange`；耐久大于 0 时恢复原 restriction 和 absorption。
-7. 绝望石装备归零后启动单独的周期任务；持有者疯狂时按原版公式修复第一段，随后恢复装备权限并交回原版装备态自修复。
+7. 绝望石装备归零后启动单独的周期任务；持有者处于普通理智模式时按原版基础公式修复一次，随后恢复装备权限；玩家重新穿戴后由原版继续自修复。
 8. 延后一帧同步一次状态，覆盖 `Fueled:OnLoad` 只初始化数值、不发送 `percentusedchange` 的存档加载路径。
 
 没有整体重写 `Armor:SetCondition`、`FiniteUses:SetUses`、`Fueled:DoDelta` 或 `EntityScript.Remove`，避免破坏其他 Mod 和游戏更新增加的组件语义。
@@ -112,7 +112,7 @@ LOADING LUA SUCCESS
 - `raincoat` 直接删除回调、`umbrella` 自定义删除回调、真实 sewing kit 修复，以及雨伞耗尽时自动装备备用雨具。
 - 背包中已有同类 broken 盾牌或雨伞时，后续健康备用品仍能自动装备。
 - `bernie_inactive` 破损落地后的延迟删除路径和真实 sewing kit 修复。
-- 绝望石头盔和盔甲归零后卸下/禁装、疯狂状态下的破损自修复桥接，以及恢复后周期任务退出。
+- 绝望石头盔和盔甲归零后卸下/禁装、零理智、普通理智模式下的破损自修复桥接，以及恢复后周期任务退出。
 - `greenamulet`、`walking_stick`、`footballhat` 三类不可修复反例维持原版删除。
 
 ## 参考资料
